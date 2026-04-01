@@ -1,0 +1,27 @@
+[project]
+name = "lob-research"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "apscheduler>=3.11.2",
+    "dash>=4.1.0",
+    "numpy>=2.4.4",
+    "pandas>=3.0.2",
+    "plotly>=6.6.0",
+    "pyarrow>=23.0.1",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "questdb>=4.1.0",
+    "sortedcontainers>=2.4.0",
+    "structlog>=25.5.0",
+    "watchdog>=6.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.8",
+]
