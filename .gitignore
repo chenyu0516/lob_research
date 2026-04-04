@@ -12,5 +12,5 @@ wheels/
 __pycache__/
 *.pyc
 data/raw/
-data/parquet/
+*.parquet
 
