@@ -48,14 +48,13 @@ _SCHEMA_MAP_PATH = _PROJECT_ROOT / "config" / "schema_map.yaml"
 
 # Columns always produced by Stage A regardless of source
 STAGE_A_COLS = [
-    "ts",          # int64 nanoseconds UTC
-    "symbol",      # str
-    "order_id",    # str
-    "side",        # BID | ASK | NaN
-    "price",       # float64, scaled
-    "size",        # float64, resolved from priority list
-    "raw_type",    # str, original source event type code — for Stage B
-    "raw_reason",  # str, original reason field if present — for Stage B
+    "ts",        # int64 nanoseconds UTC
+    "symbol",    # str
+    "order_id",  # str
+    "side",      # BID | ASK | NaN
+    "price",     # float64, scaled
+    "size",      # float64, resolved from priority list
+    "raw_type",  # str, original source event type code — for Stage B
 ]
 
 
@@ -283,14 +282,6 @@ def run(
     et_col = src_cfg.get("event_type_col", "type")
     _require(raw, et_col, source_key, "event_type_col")
     out["raw_type"] = raw[et_col].astype(str)
-
-    # ── Raw reason — preserved for Stage B ────────────────────────────────────
-    reason_col = src_cfg.get("reason_col", "reason")
-    out["raw_reason"] = (
-        raw[reason_col].fillna("").astype(str)
-        if reason_col in raw.columns
-        else pd.Series("", index=raw.index)
-    )
 
     # ── Auxiliary columns — source-specific fields Stage B may need ───────────
     for col in src_cfg.get("aux_cols", []):
