@@ -11,4 +11,4 @@ wheels/
 .venv/
 __pycache__/
 *.pyc
-data/raw/
+data/
