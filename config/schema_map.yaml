@@ -26,19 +26,18 @@
 
 coinbase:
   column_map:
-    time:       ts
-    product_id: symbol
-    order_id:   order_id
-    side:       side
-    price:      price
+    time_exchange: ts        # exchange-reported event time (time-of-day only)
+    order_id:      order_id
+    is_buy:        side      # 1 = buy = BID, 0 = sell = ASK
+    entry_px:   price     # DECISION: confirm exact price column name
 
-  # Primary size column. Stage A tries these in order, taking the first non-NaN.
-  # DECISION: confirm which column carries size in your actual export.
+  # Primary size column.
+  # DECISION: confirm exact size column name in your actual export.
   size_col_priority:
-    - size
+    - entry_sx
 
   # The column that carries the raw event type code
-  event_type_col: type
+  event_type_col: update_type
 
   # Auxiliary columns passed through Stage A for Stage B's use.
   # new_size / new_price are present on SET events only — NaN on all other rows.
@@ -63,11 +62,10 @@ coinbase:
     DELETE:   CANCEL
     SNAPSHOT: ADD
 
-  # Map Coinbase side strings → internal side
-  # DECISION: confirm casing in your actual export (may be uppercase BID/ASK)
+  # is_buy is an integer flag: 1 = buy side = BID, 0 = sell side = ASK
   side_map:
-    buy:  BID
-    sell: ASK
+    1: BID
+    0: ASK
 
   # Timestamp format — after date injection the column becomes a full
   # datetime string e.g. "2024-01-15 09:30:00.123456", still parsed as iso8601
@@ -77,12 +75,21 @@ coinbase:
   price_scale: 1.0
 
   # Filename parsing — controls run_from_file() behaviour
-  # date_injection: true  → combine date from filename with time-only CSV column
-  # date_injection: false → treat the timestamp column as already complete
   filename_parsing:
     date_injection: true
-    date_format:    "%Y%m%d"   # format of the date prefix in the filename
-    filename_sep:   "_"        # separator between date and symbol in filename
+    date_format:    "%Y%m%d"
+    filename_sep:   "_"
+
+    # Midnight correction for time_exchange
+    # Coinbase records exchange-side events with time-of-day only.
+    # Events near midnight may have time_exchange = 23:59:xx on the previous
+    # calendar day while time_coinapi (the receive time) shows 00:00:xx of the
+    # filename date. Detect these rows and inject filename_date - 1 day instead.
+    midnight_correction:
+      enabled:              true
+      reference_col:        time_coinapi   # receive-time column used to detect crossing
+      late_hour_threshold:  20             # exchange hour >= this means "late night"
+      early_hour_threshold: 2              # reference hour <= this means "early next day" 
 
 
 # ============================================================

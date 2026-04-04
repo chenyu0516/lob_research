@@ -129,21 +129,63 @@ def run_from_file(
                 f"Available columns: {list(raw.columns)}"
             )
 
-        # Validate the date string against the declared format
         try:
-            pd.to_datetime(date_str, format=date_fmt)
+            file_date = pd.to_datetime(date_str, format=date_fmt)
         except ValueError:
             raise ValueError(
                 f"Date string '{date_str}' does not match "
                 f"date_format '{date_fmt}' in schema_map.yaml."
             )
 
-        # Combine date prefix with time-of-day string
-        # e.g. "20240115" + " " + "09:30:00.123456" → "2024-01-15 09:30:00.123456"
-        date_prefix = pd.to_datetime(date_str, format=date_fmt).strftime("%Y-%m-%d")
-        raw[ts_col]  = date_prefix + " " + raw[ts_col].astype(str)
-        log.info("date injected into timestamp column",
-                 ts_col=ts_col, date_prefix=date_prefix)
+        date_prefix_today     = file_date.strftime("%Y-%m-%d")
+        date_prefix_yesterday = (file_date - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # ── Midnight correction ───────────────────────────────────────────────
+        # When time_exchange is time-of-day only, events that occurred just
+        # before midnight on the previous calendar day will have a late
+        # time_exchange (e.g. 23:59:xx) while the receive-time column shows
+        # an early time of the filename date (e.g. 00:00:xx).
+        # Detect these rows and inject filename_date - 1 day for them.
+        mc_cfg  = fp_cfg.get("midnight_correction", {})
+        mc_on   = mc_cfg.get("enabled", False)
+        ref_col = mc_cfg.get("reference_col", "")
+
+        if mc_on and ref_col and ref_col in raw.columns:
+            late_thresh  = int(mc_cfg.get("late_hour_threshold",  20))
+            early_thresh = int(mc_cfg.get("early_hour_threshold",  2))
+
+            exchange_hour  = pd.to_datetime(
+                raw[ts_col].astype(str), format="%H:%M:%S.%f", errors="coerce"
+            ).dt.hour
+
+            reference_hour = pd.to_datetime(
+                raw[ref_col].astype(str), format="%H:%M:%S.%f", errors="coerce"
+            ).dt.hour
+
+            crossed_midnight = (
+                (exchange_hour  >= late_thresh) &
+                (reference_hour <= early_thresh)
+            )
+
+            date_prefixes          = pd.Series(date_prefix_today,     index=raw.index)
+            date_prefixes[crossed_midnight] = date_prefix_yesterday
+
+            raw[ts_col] = date_prefixes + " " + raw[ts_col].astype(str)
+
+            n_corrected = int(crossed_midnight.sum())
+            log.info(
+                "midnight correction applied",
+                ts_col=ts_col,
+                date_today=date_prefix_today,
+                date_yesterday=date_prefix_yesterday,
+                rows_corrected=n_corrected,
+            )
+
+        else:
+            # No correction needed — inject filename date for all rows
+            raw[ts_col] = date_prefix_today + " " + raw[ts_col].astype(str)
+            log.info("date injected into timestamp column",
+                     ts_col=ts_col, date_prefix=date_prefix_today)
 
     return run(raw, source=source_key, schema_map_path=schema_map_path,
                symbol_override=symbol)
