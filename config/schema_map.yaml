@@ -25,11 +25,14 @@
 # If column names differ, update this section.
 
 coinbase:
+
+  csv_divider: ";"
+
   column_map:
-    time_exchange: ts        # exchange-reported event time (time-of-day only)
-    order_id:      order_id
-    is_buy:        side      # 1 = buy = BID, 0 = sell = ASK
-    entry_px:   price     # DECISION: confirm exact price column name
+    ts:       time_exchange   # exchange-reported event time (time-of-day only)
+    order_id: order_id
+    side:     is_buy          # 1 = buy = BID, 0 = sell = ASK
+    price:    entry_px        # DECISION: confirm exact price column name
 
   # Primary size column.
   # DECISION: confirm exact size column name in your actual export.
@@ -105,13 +108,14 @@ coinbase:
 # If column names differ, update this section.
 
 databento:
-  column_map:
-    ts_event:  ts
-    order_id:  order_id
-    price:     price
-    size:      size
-    symbol:    symbol    # present in CSV export — no metadata file needed
 
+  csv_divider: ","
+
+  column_map:
+    ts:       ts_event   # already int64 nanoseconds UTC — no parsing needed
+    order_id: order_id
+    price:    price
+    size:     size
   # The column that carries the raw event type code
   event_type_col: action
 

@@ -116,7 +116,8 @@ def run_from_file(
     log.info("parsed filename", date=date_str, symbol=symbol, source=source_key)
 
     # ── Read CSV ──────────────────────────────────────────────────────────────
-    raw = pd.read_csv(path, low_memory=False)
+    csv_divider = src_cfg.get("csv_divider", ",")
+    raw = pd.read_csv(path, low_memory=False, sep=csv_divider)
     log.info("loaded raw csv", path=str(path), rows=len(raw))
 
     # ── Inject date into time-only timestamp column ───────────────────────────

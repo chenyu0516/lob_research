@@ -34,6 +34,7 @@ EVENT_TABLE_COLS = [
     "order_id",
     "symbol",
     "source",
+    "side",           # BID | ASK
     "event_type",     # ADD | MODIFY | FILL | CANCEL
     "event_seq",      # monotonic int, per-order sequence number starting at 0
     "ts",             # int64, nanoseconds since Unix epoch UTC
@@ -100,6 +101,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
             order_state[oid] = {
                 "remaining": initial_size,
                 "price":     _float(row.price),
+                "side":      row.side,
                 "seq":       0,
             }
             records.append(_record(
@@ -252,6 +254,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
             order_state[oid] = {
                 "remaining": initial_size,
                 "price":     _float(row.price),
+                "side":      row.side,
                 "seq":       0,
             }
             records.append(_record(
@@ -334,6 +337,7 @@ def _emit_snapshot_resets(
             "order_id":       oid,
             "symbol":         current_row.symbol,
             "source":         "COINBASE",
+            "side":           state["side"],
             "event_type":     "CANCEL",
             "event_seq":      state["seq"] + 1,
             "ts":             current_row.ts,
@@ -358,6 +362,7 @@ def _record(
         "order_id":       order_id,
         "symbol":         row.symbol,
         "source":         "COINBASE",
+        "side":           row.side,
         "event_type":     event_type,
         "event_seq":      event_seq,
         "ts":             row.ts,
