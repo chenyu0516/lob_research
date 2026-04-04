@@ -1,0 +1,33 @@
+project:
+  name: lob-research
+  log_level: INFO          # DEBUG | INFO | WARNING
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  parquet_dir: data/parquet
+
+sources:
+  coinbase:
+    raw_subdir: coinbase   # data/raw/coinbase/
+  databento:
+    raw_subdir: databento  # data/raw/databento/
+    # DECISION: Databento exports a metadata CSV alongside the data CSV.
+    # It maps numeric instrument_id → human-readable symbol (e.g. AAPL).
+    # Set this to the filename of that metadata file if you have it.
+    # If left empty, the raw instrument_id integer will be used as the symbol.
+    meta_filename: ""      # e.g. "metadata.csv"
+
+questdb:
+  host: localhost
+  port: 9009               # ILP TCP ingestion port
+  http_port: 9000          # Query / REST port
+
+stats:
+  plugins_dir: src/stats/plugins
+  compute_interval_sec: 1  # How often to compute stats during replay
+
+viz:
+  host: 127.0.0.1
+  port: 8050
+  update_interval_ms: 1000

@@ -1,0 +1,149 @@
+# ============================================================
+#  Internal unified schema
+# ============================================================
+# Every downstream module works exclusively with these fields.
+#
+#  ts         int64    nanoseconds since Unix epoch, UTC
+#  symbol     str      e.g. "BTC-USD", "AAPL"
+#  event_type str      ADD | MODIFY | FILL | CANCEL
+#  order_id   str      unique order identifier (string-cast)
+#  side       str      BID | ASK
+#  price      float64  in instrument's native currency unit
+#  size       float64  quantity (lots, shares, or base asset units)
+#  source     str      COINBASE | DATABENTO
+
+# ============================================================
+#  Coinbase — L3 full order book CSV
+# ============================================================
+# Typical columns from Coinbase Advanced Trade historical data:
+#   time, sequence, product_id, type, order_id, side,
+#   price, size, remaining_size, new_size, old_size,
+#   trade_id, maker_order_id, taker_order_id
+#
+# DECISION: Verify your actual CSV headers by running:
+#   python -c "import pandas as pd; print(pd.read_csv('data/raw/coinbase/YOUR_FILE.csv', nrows=2).columns.tolist())"
+# If column names differ, update this section.
+
+coinbase:
+  column_map:
+    time:       ts
+    product_id: symbol
+    order_id:   order_id
+    side:       side
+    price:      price
+
+  # Primary size column. Stage A tries these in order, taking the first non-NaN.
+  # DECISION: confirm which column carries size in your actual export.
+  size_col_priority:
+    - size
+
+  # The column that carries the raw event type code
+  event_type_col: type
+
+  # Auxiliary columns passed through Stage A for Stage B's use.
+  # new_size / new_price are present on SET events only — NaN on all other rows.
+  # DECISION: confirm these column names match your actual export.
+  aux_cols:
+    - new_size
+    - new_price
+
+  # Stage A passes raw_type through unchanged. Stage B handles all branching
+  # directly on the raw string — this map is documentation only.
+  # ADD      → ADD
+  # SUB      → FILL  (non-trade subtraction)
+  # MATCH    → FILL  (trade-driven subtraction)
+  # SET      → MODIFY (set semantics, price and/or size)
+  # DELETE   → MODIFY (partial) or CANCEL (full), or ignored (zero size)
+  # SNAPSHOT → CANCEL all live orders (SNAPSHOT_RESET), then ADD each snapshot row
+  event_type_map:
+    ADD:      ADD
+    SUB:      FILL
+    MATCH:    FILL
+    SET:      MODIFY
+    DELETE:   CANCEL
+    SNAPSHOT: ADD
+
+  # Map Coinbase side strings → internal side
+  # DECISION: confirm casing in your actual export (may be uppercase BID/ASK)
+  side_map:
+    buy:  BID
+    sell: ASK
+
+  # Timestamp format — after date injection the column becomes a full
+  # datetime string e.g. "2024-01-15 09:30:00.123456", still parsed as iso8601
+  timestamp_format: iso8601
+
+  # Price is already in dollar units — no scaling needed
+  price_scale: 1.0
+
+  # Filename parsing — controls run_from_file() behaviour
+  # date_injection: true  → combine date from filename with time-only CSV column
+  # date_injection: false → treat the timestamp column as already complete
+  filename_parsing:
+    date_injection: true
+    date_format:    "%Y%m%d"   # format of the date prefix in the filename
+    filename_sep:   "_"        # separator between date and symbol in filename
+
+
+# ============================================================
+#  Databento — MBO (Market By Order) CSV
+# ============================================================
+# Confirmed columns from Databento MBO CSV export (from sample data):
+#   ts_recv, ts_event, rtype, publisher_id, instrument_id,
+#   action, side, price, size, channel_id, order_id,
+#   flags, ts_in_delta, sequence, symbol
+#
+# DECISION: Verify your actual CSV headers:
+#   python -c "import pandas as pd; print(pd.read_csv('data/raw/databento/YOUR_FILE.csv', nrows=2).columns.tolist())"
+# If column names differ, update this section.
+
+databento:
+  column_map:
+    ts_event:  ts
+    order_id:  order_id
+    price:     price
+    size:      size
+    symbol:    symbol    # present in CSV export — no metadata file needed
+
+  # The column that carries the raw event type code
+  event_type_col: action
+
+  # Stage B handles all action branching directly on raw strings.
+  # This map is documentation only — not used at runtime.
+  # A  → ADD
+  # M  → MODIFY (set semantics for both price and size)
+  # C  → FILL (in fill sequence) or CANCEL/MODIFY PARTIAL_DELETE (standalone)
+  # F  → provides order_id for FILL, no state change
+  # T  → skip (aggressing order, order_id = 0)
+  # R  → synthetic CANCEL (SNAPSHOT_RESET) for all live orders, then clear
+  # N  → skip
+  event_type_map:
+    A: ADD
+    M: MODIFY
+    C: CANCEL
+    F: FILL
+    T: ~
+    R: ~
+    N: ~
+
+  # Map Databento side codes → internal side
+  side_map:
+    A: ASK
+    B: BID
+    N: ~    # present on T, F, R rows — no book side
+
+  # Timestamp: ts_event is already int64 nanoseconds UTC
+  timestamp_format: unix_ns
+
+  # Databento prices are fixed-point int64.
+  # Actual price = raw_value * price_scale
+  # Standard scale factor: 1e-9 (confirmed from FIXED_PRICE_SCALE in databento SDK)
+  # DECISION: confirm this matches your specific dataset and publisher.
+  price_scale: 1.0e-9
+
+  # Auxiliary columns passed through Stage A for Stage B's use.
+  # sequence — groups related events (F+C fill pairs, T+F+C trade fills)
+  # flags    — reserved for future use (F_LAST, F_SNAPSHOT etc.)
+  aux_cols:
+    - sequence
+    - flags

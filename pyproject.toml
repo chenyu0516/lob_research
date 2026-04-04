@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "apscheduler>=3.11.2",
     "dash>=4.1.0",
+    "databento>=0.74.1",
     "numpy>=2.4.4",
     "pandas>=3.0.2",
     "plotly>=6.6.0",
