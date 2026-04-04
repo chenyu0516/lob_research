@@ -120,12 +120,13 @@ def run(events: pd.DataFrame) -> ValidationReport:
             min_value=float(events.loc[neg_mask, "remaining_size"].min()),
         )
 
-    # CHECK_DUP_SEQ — duplicate (order_id, event_seq) pairs
-    dup_mask = events.duplicated(subset=["order_id", "event_seq"], keep=False)
+    # CHECK_DUP_SEQ — duplicate (order_id, session_id, event_seq) triplets
+    # Using the composite key because order_id is reused across sessions
+    dup_mask = events.duplicated(subset=["order_id", "session_id", "event_seq"], keep=False)
     dup_orders = events.loc[dup_mask, "order_id"].unique().tolist()
     report.violations["CHECK_DUP_SEQ"] = dup_orders
     if dup_orders:
-        log.warning("duplicate (order_id, event_seq) pairs", order_count=len(dup_orders))
+        log.warning("duplicate (order_id, session_id, event_seq) triplets", order_count=len(dup_orders))
 
     # ── Order-level checks (groupby order_id) ────────────────────────────────
     multi_add    : list = []

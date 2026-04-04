@@ -32,6 +32,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 EVENT_TABLE_COLS = [
     "order_id",
+    "session_id",     # int, increments on each SNAPSHOT — composite key with order_id
     "symbol",
     "source",
     "side",           # BID | ASK
@@ -80,9 +81,39 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                    then ADD for each order in the snapshot
     """
     records: list[dict] = []
+    session_id: int = 0
 
-    # { order_id: { "remaining": float, "price": float, "seq": int } }
+    # { order_id: { "remaining": float, "price": float, "side": str, "seq": int } }
     order_state: dict[str, dict] = {}
+
+    # ── Pre-processing: identify zero-DELETE + paired ADD rows to skip ───────
+    # A zero-size DELETE accompanied by an ADD for the same order_id at the
+    # exact same timestamp means "nothing changed" — both rows are no-ops.
+    # Identify these pairs upfront and skip them in the main loop.
+    zero_del = df[(df["raw_type"] == "DELETE") & (df["size"] == 0.0)][["order_id", "ts"]]
+    add_rows  = df[df["raw_type"] == "ADD"][["order_id", "ts"]]
+    paired = zero_del.merge(add_rows, on=["order_id", "ts"], how="inner")
+    skip_pairs: set[tuple] = set(zip(paired["order_id"], paired["ts"]))
+    if skip_pairs:
+        log.info(
+            "zero-DELETE + paired ADD no-ops identified — will skip both",
+            count=len(skip_pairs),
+        )
+
+    # Identify SUB + ADD pairs at same (order_id, ts) — implicit reprice
+    # Coinbase encodes a price change as: SUB (full drain) + ADD (new price)
+    # Both at the exact same nanosecond. We skip the SUB and convert the ADD
+    # into a MODIFY PRICE_CHANGE to preserve the correct order lifecycle.
+    sub_rows   = df[df["raw_type"] == "SUB"][["order_id", "ts", "price"]]
+    add_rows2  = df[df["raw_type"] == "ADD"][["order_id", "ts", "price"]]
+    repriced   = sub_rows.merge(add_rows2, on=["order_id", "ts"], how="inner",
+                                suffixes=("_sub", "_add"))
+    reprice_pairs: set[tuple] = set(zip(repriced["order_id"], repriced["ts"]))
+    if reprice_pairs:
+        log.info(
+            "SUB + paired ADD implicit reprice pairs identified",
+            count=len(reprice_pairs),
+        )
 
     # Tracks whether the previous row was a SNAPSHOT row.
     # Used to detect the start of a new snapshot sequence and trigger
@@ -90,22 +121,48 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
     _in_snapshot = False
 
     for row in df.itertuples(index=False):
+        # Skip zero-DELETE / paired-ADD no-op pairs
+        if (row.order_id, row.ts) in skip_pairs and row.raw_type in ("DELETE", "ADD"):
+            continue
+
         oid      = row.order_id
         raw_type = row.raw_type
 
         # ── ADD ───────────────────────────────────────────────────────────────
         # New order arrives on the book. Initialize state.
+        # Exception: if this ADD is part of a reprice pair (SUB + ADD at same ts),
+        # treat it as a MODIFY PRICE_CHANGE on the existing order instead.
         if raw_type == "ADD":
             _in_snapshot = False
+            if (oid, row.ts) in reprice_pairs:
+                if oid not in order_state:
+                    log.warning("reprice ADD for untracked order — treating as ADD",
+                                order_id=oid)
+                else:
+                    new_price = _float(row.price)
+                    order_state[oid]["price"] = new_price
+                    records.append(_record(
+                        row=row, order_id=oid,
+                        session_id=order_state[oid]["session_id"],
+                        event_type="MODIFY",
+                        event_seq=_advance_seq(order_state, oid),
+                        size=order_state[oid]["remaining"],
+                        remaining_size=order_state[oid]["remaining"],
+                        reason=_PRICE_CHANGE,
+                        price_override=new_price,
+                    ))
+                    continue
             initial_size = _float(row.size)
             order_state[oid] = {
-                "remaining": initial_size,
-                "price":     _float(row.price),
-                "side":      row.side,
-                "seq":       0,
+                "remaining":  initial_size,
+                "price":      _float(row.price),
+                "side":       row.side,
+                "session_id": session_id,
+                "seq":        0,
             }
             records.append(_record(
                 row=row, order_id=oid,
+                session_id=session_id,
                 event_type="ADD", event_seq=0,
                 size=initial_size, remaining_size=initial_size,
                 reason=None,
@@ -114,8 +171,12 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
         # ── SUB ───────────────────────────────────────────────────────────────
         # Volume subtracted from an existing order (non-trade path).
         # size column = amount removed, subtraction semantics.
+        # If this SUB is part of a reprice pair (SUB + ADD at same ts), skip it —
+        # the paired ADD will be converted to a MODIFY PRICE_CHANGE instead.
         elif raw_type == "SUB":
             _in_snapshot = False
+            if (oid, row.ts) in reprice_pairs:
+                continue
             if oid not in order_state:
                 log.warning("SUB for untracked order — skipping", order_id=oid)
                 continue
@@ -129,6 +190,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
 
             records.append(_record(
                 row=row, order_id=oid,
+                session_id=order_state[oid]["session_id"],
                 event_type="FILL",
                 event_seq=_advance_seq(order_state, oid),
                 size=subtracted, remaining_size=remaining,
@@ -153,6 +215,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
 
             records.append(_record(
                 row=row, order_id=oid,
+                session_id=order_state[oid]["session_id"],
                 event_type="FILL",
                 event_seq=_advance_seq(order_state, oid),
                 size=matched, remaining_size=remaining,
@@ -178,6 +241,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                 order_state[oid]["remaining"] = new_size
                 records.append(_record(
                     row=row, order_id=oid,
+                    session_id=order_state[oid]["session_id"],
                     event_type="MODIFY",
                     event_seq=_advance_seq(order_state, oid),
                     size=new_size, remaining_size=new_size,
@@ -188,6 +252,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                 order_state[oid]["price"] = new_price
                 records.append(_record(
                     row=row, order_id=oid,
+                    session_id=order_state[oid]["session_id"],
                     event_type="MODIFY",
                     event_seq=_advance_seq(order_state, oid),
                     size=order_state[oid]["remaining"],
@@ -198,7 +263,8 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
 
         # ── DELETE ────────────────────────────────────────────────────────────
         # Order removed from the book.
-        # size == 0          → ignore entirely
+        # size == 0 with no paired ADD → ignore (handled by pre-processing skip
+        #                                for the zero-DELETE + ADD pair case)
         # remaining - size > 0 → partial delete, order survives: MODIFY PARTIAL_DELETE
         # remaining - size <= 0 → full delete, order gone: CANCEL CANCELLED
         elif raw_type == "DELETE":
@@ -209,7 +275,8 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
 
             delete_size = _float(row.size)
 
-            # Ignore zero-size deletes
+            # Ignore any remaining zero-size deletes not caught by pre-processing
+            # (e.g. zero DELETE with no paired ADD in this file)
             if delete_size == 0.0:
                 log.debug("zero-size DELETE ignored", order_id=oid)
                 continue
@@ -221,6 +288,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                 order_state[oid]["remaining"] = new_remaining
                 records.append(_record(
                     row=row, order_id=oid,
+                    session_id=order_state[oid]["session_id"],
                     event_type="MODIFY",
                     event_seq=_advance_seq(order_state, oid),
                     size=delete_size, remaining_size=new_remaining,
@@ -230,6 +298,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                 # Full delete — order is gone
                 records.append(_record(
                     row=row, order_id=oid,
+                    session_id=order_state[oid]["session_id"],
                     event_type="CANCEL",
                     event_seq=_advance_seq(order_state, oid),
                     size=delete_size, remaining_size=0.0,
@@ -247,18 +316,21 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                 # First row of a new snapshot sequence — reset all live state
                 _emit_snapshot_resets(order_state, row, records)
                 order_state.clear()
+                session_id += 1
                 _in_snapshot = True
 
-            # Treat snapshot row as a fresh ADD
+            # Treat snapshot row as a fresh ADD in the new session
             initial_size = _float(row.size)
             order_state[oid] = {
-                "remaining": initial_size,
-                "price":     _float(row.price),
-                "side":      row.side,
-                "seq":       0,
+                "remaining":  initial_size,
+                "price":      _float(row.price),
+                "side":       row.side,
+                "session_id": session_id,
+                "seq":        0,
             }
             records.append(_record(
                 row=row, order_id=oid,
+                session_id=session_id,
                 event_type="ADD", event_seq=0,
                 size=initial_size, remaining_size=initial_size,
                 reason=None,
@@ -335,6 +407,7 @@ def _emit_snapshot_resets(
     for oid, state in order_state.items():
         records.append({
             "order_id":       oid,
+            "session_id":     state["session_id"],
             "symbol":         current_row.symbol,
             "source":         "COINBASE",
             "side":           state["side"],
@@ -351,6 +424,7 @@ def _emit_snapshot_resets(
 def _record(
     row,
     order_id: str,
+    session_id: int,
     event_type: str,
     event_seq: int,
     size: float,
@@ -360,6 +434,7 @@ def _record(
 ) -> dict:
     return {
         "order_id":       order_id,
+        "session_id":     session_id,
         "symbol":         row.symbol,
         "source":         "COINBASE",
         "side":           row.side,

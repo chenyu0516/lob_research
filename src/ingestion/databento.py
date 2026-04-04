@@ -93,8 +93,9 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
         - N   → skip
     """
     records: list[dict] = []
+    session_id: int = 0
 
-    # { order_id: { "remaining": float, "price": float, "seq": int } }
+    # { order_id: { "remaining": float, "price": float, "side": str, "session_id": int, "seq": int } }
     order_state: dict[int, dict] = {}
 
     # Group by sequence number, preserving chronological order of groups
@@ -116,18 +117,21 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
             elif action == "R":
                 _emit_snapshot_resets(order_state, row, records)
                 order_state.clear()
+                session_id += 1
 
             # ── A — new order on the book ─────────────────────────────────────
             elif action == "A":
                 initial_size = _float(row.size)
                 order_state[oid] = {
-                    "remaining": initial_size,
-                    "price":     _float(row.price),
-                    "side":      row.side,
-                    "seq":       0,
+                    "remaining":  initial_size,
+                    "price":      _float(row.price),
+                    "side":       row.side,
+                    "session_id": session_id,
+                    "seq":        0,
                 }
                 records.append(_record(
                     row=row, order_id=oid,
+                    session_id=session_id,
                     event_type="ADD", event_seq=0,
                     size=initial_size, remaining_size=initial_size,
                     reason=None,
@@ -145,13 +149,15 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                     )
                     initial_size = _float(row.size)
                     order_state[oid] = {
-                        "remaining": initial_size,
-                        "price":     _float(row.price),
-                        "side":      row.side,
-                        "seq":       0,
+                        "remaining":  initial_size,
+                        "price":      _float(row.price),
+                        "side":       row.side,
+                        "session_id": session_id,
+                        "seq":        0,
                     }
                     records.append(_record(
                         row=row, order_id=oid,
+                        session_id=session_id,
                         event_type="ADD", event_seq=0,
                         size=initial_size, remaining_size=initial_size,
                         reason=None,
@@ -170,6 +176,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                     order_state[oid]["remaining"] = new_size
                     records.append(_record(
                         row=row, order_id=oid,
+                        session_id=order_state[oid]["session_id"],
                         event_type="MODIFY",
                         event_seq=_advance_seq(order_state, oid),
                         size=new_size, remaining_size=new_size,
@@ -180,6 +187,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                     order_state[oid]["price"] = new_price
                     records.append(_record(
                         row=row, order_id=oid,
+                        session_id=order_state[oid]["session_id"],
                         event_type="MODIFY",
                         event_seq=_advance_seq(order_state, oid),
                         size=order_state[oid]["remaining"],
@@ -216,6 +224,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
 
                     records.append(_record(
                         row=row, order_id=oid,
+                        session_id=order_state[oid]["session_id"],
                         event_type="FILL",
                         event_seq=_advance_seq(order_state, oid),
                         size=subtracted, remaining_size=remaining,
@@ -229,6 +238,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                     if remaining <= 0.0:
                         records.append(_record(
                             row=row, order_id=oid,
+                            session_id=order_state[oid]["session_id"],
                             event_type="CANCEL",
                             event_seq=_advance_seq(order_state, oid),
                             size=subtracted, remaining_size=0.0,
@@ -238,6 +248,7 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                     else:
                         records.append(_record(
                             row=row, order_id=oid,
+                            session_id=order_state[oid]["session_id"],
                             event_type="MODIFY",
                             event_seq=_advance_seq(order_state, oid),
                             size=subtracted, remaining_size=remaining,
@@ -311,6 +322,7 @@ def _emit_snapshot_resets(
     for oid, state in order_state.items():
         records.append({
             "order_id":       oid,
+            "session_id":     state["session_id"],
             "symbol":         current_row.symbol,
             "source":         "DATABENTO",
             "side":           state["side"],
@@ -327,6 +339,7 @@ def _emit_snapshot_resets(
 def _record(
     row,
     order_id: int,
+    session_id: int,
     event_type: str,
     event_seq: int,
     size: float,
@@ -336,6 +349,7 @@ def _record(
 ) -> dict:
     return {
         "order_id":       order_id,
+        "session_id":     session_id,
         "symbol":         row.symbol,
         "source":         "DATABENTO",
         "side":           row.side,

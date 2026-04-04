@@ -51,6 +51,7 @@ _PARTIAL_FILL_REASONS = {"PARTIAL_FILL", "PARTIAL_FILL_TRADE"}
 
 LIFETIME_COLS = [
     "order_id",
+    "session_id",
     "symbol",
     "source",
     "born_ts",
@@ -91,7 +92,7 @@ def build(events: pd.DataFrame) -> pd.DataFrame:
     records: list[dict] = []
     skipped = 0
 
-    for order_id, group in events.groupby("order_id", sort=False):
+    for (order_id, session_id), group in events.groupby(["order_id", "session_id"], sort=False):
         group = group.sort_values("event_seq")
         anomaly_flags: list[str] = []
 
@@ -191,6 +192,7 @@ def build(events: pd.DataFrame) -> pd.DataFrame:
 
         records.append({
             "order_id":           order_id,
+            "session_id":         session_id,
             "symbol":             group["symbol"].iloc[0],
             "source":             group["source"].iloc[0],
             "born_ts":            born_ts,
