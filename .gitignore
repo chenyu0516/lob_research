@@ -1,16 +1,71 @@
-# Python-generated files
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
-*.py[oc]
-build/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
 dist/
-wheels/
-*.egg-info
+build/
+.eggs/
 
-# Virtual environments
-.venv
+# ── Virtual environments ──────────────────────────────────────────────────────
 .venv/
-__pycache__/
-*.pyc
-data/raw/
-*.parquet
+venv/
+env/
 
+# ── uv ───────────────────────────────────────────────────────────────────────
+# Keep uv.lock in version control — it pins exact dependency versions
+# Uncomment the line below only if you intentionally want to exclude it
+# uv.lock
+
+# ── Data files — never commit raw or processed market data ───────────────────
+data/raw/
+data/processed/
+data/parquet/
+data/questdb/
+*.csv
+*.csv.zst
+*.parquet
+*.dbn
+*.dbn.zst
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ── Testing and coverage ──────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ── Type checking ─────────────────────────────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+
+# ── Allow empty directory markers ────────────────────────────────────────────
+!data/
+!data/raw/
+!data/raw/coinbase/
+!data/raw/databento/
+!data/processed/
+!data/parquet/
+!**/.gitkeep
