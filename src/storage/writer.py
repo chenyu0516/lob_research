@@ -124,7 +124,7 @@ class StorageWriter:
                     )
 
                 elif conflict == ConflictMode.MERGE:
-                    existing   = pq.read_table(partition_file).to_pandas()
+                    existing   = pq.ParquetFile(partition_file).read().to_pandas()
                     rows_before = len(existing)
                     out        = (
                         pd.concat([existing, out], ignore_index=True)

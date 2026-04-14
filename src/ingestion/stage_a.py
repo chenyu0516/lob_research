@@ -234,7 +234,7 @@ def run(
         out["ts"] = pd.to_numeric(raw[ts_col], errors="coerce").astype("int64")
     else:
         # Covers both iso8601 and the combined date+time string after injection
-        out["ts"] = pd.to_datetime(raw[ts_col], utc=True).astype("int64")
+        out["ts"] = pd.to_datetime(raw[ts_col], utc=True).dt.as_unit("ns").astype("int64")
 
     # ── Symbol ────────────────────────────────────────────────────────────────
     if symbol_override:
@@ -257,10 +257,13 @@ def run(
     )
 
     # ── Side ──────────────────────────────────────────────────────────────────
+    # Cast to str before map so that integer-valued columns (e.g. Coinbase
+    # is_buy = 1/0 read as int64) match string keys in the config without
+    # relying on Python hash equality between int and float types.
     side_col = src_cfg["column_map"].get("side", "side")
     side_map: dict = src_cfg.get("side_map", {})
     if side_col in raw.columns:
-        out["side"] = raw[side_col].map(side_map)
+        out["side"] = raw[side_col].astype(str).map(side_map)
     else:
         out["side"] = np.nan
 

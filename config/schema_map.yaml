@@ -66,9 +66,11 @@ coinbase:
     SNAPSHOT: ADD
 
   # is_buy is an integer flag: 1 = buy side = BID, 0 = sell side = ASK
+  # Keys are strings because Stage A casts the column with astype(str) before
+  # map(), making the lookup unambiguous regardless of the column's dtype.
   side_map:
-    1: BID
-    0: ASK
+    "1": BID
+    "0": ASK
 
   # Timestamp format — after date injection the column becomes a full
   # datetime string e.g. "2024-01-15 09:30:00.123456", still parsed as iso8601

@@ -104,10 +104,17 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
     # Coinbase encodes a price change as: SUB (full drain) + ADD (new price)
     # Both at the exact same nanosecond. We skip the SUB and convert the ADD
     # into a MODIFY PRICE_CHANGE to preserve the correct order lifecycle.
-    sub_rows   = df[df["raw_type"] == "SUB"][["order_id", "ts", "price"]]
-    add_rows2  = df[df["raw_type"] == "ADD"][["order_id", "ts", "price"]]
+    # Guard against false positives: only flag as reprice when the SUB's size
+    # equals the ADD's size (confirming the SUB fully drains what the ADD
+    # re-adds). A partial SUB coincidentally sharing the same (order_id, ts)
+    # as an ADD must not be swallowed — it is a real fill.
+    sub_rows   = df[df["raw_type"] == "SUB"][["order_id", "ts", "price", "size"]]
+    add_rows2  = df[df["raw_type"] == "ADD"][["order_id", "ts", "price", "size"]]
     repriced   = sub_rows.merge(add_rows2, on=["order_id", "ts"], how="inner",
                                 suffixes=("_sub", "_add"))
+    repriced   = repriced[
+        np.isclose(repriced["size_sub"], repriced["size_add"], rtol=0, atol=1e-9)
+    ]
     reprice_pairs: set[tuple] = set(zip(repriced["order_id"], repriced["ts"]))
     if reprice_pairs:
         log.info(
@@ -140,14 +147,16 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
                                 order_id=oid)
                 else:
                     new_price = _float(row.price)
-                    order_state[oid]["price"] = new_price
+                    new_size  = _float(row.size)   # ADD row carries the authoritative size
+                    order_state[oid]["price"]     = new_price
+                    order_state[oid]["remaining"] = new_size
                     records.append(_record(
                         row=row, order_id=oid,
                         session_id=order_state[oid]["session_id"],
                         event_type="MODIFY",
                         event_seq=_advance_seq(order_state, oid),
-                        size=order_state[oid]["remaining"],
-                        remaining_size=order_state[oid]["remaining"],
+                        size=new_size,
+                        remaining_size=new_size,
                         reason=_PRICE_CHANGE,
                         price_override=new_price,
                     ))

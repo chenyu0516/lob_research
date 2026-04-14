@@ -165,7 +165,9 @@ def build(events: pd.DataFrame) -> pd.DataFrame:
         # event_seq is not monotonically increasing.
         # Could indicate out-of-order delivery or a Stage B sequencing bug.
         seq = group["event_seq"].tolist()
-        if seq != sorted(seq):
+        s = sorted(seq)
+        has_gap = len(s) > 1 and any(b - a != 1 for a, b in zip(s, s[1:]))
+        if seq != s or has_gap:
             anomaly_flags.append("BAD_SEQ")
             log.warning("non-monotonic event_seq", order_id=order_id, seq=seq)
 

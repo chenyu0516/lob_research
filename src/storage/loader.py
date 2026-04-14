@@ -70,7 +70,7 @@ def load_events(
                 f"Run list_available() to see what is on disk."
             )
         log.info("loading partition", path=str(partition_file))
-        frames.append(pq.read_table(partition_file).to_pandas())
+        frames.append(pq.ParquetFile(partition_file).read().to_pandas())
 
     if not frames:
         return pd.DataFrame()

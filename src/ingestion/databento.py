@@ -42,8 +42,10 @@ _PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 EVENT_TABLE_COLS = [
     "order_id",
+    "session_id",     # int, increments on each R (clear) — composite key with order_id
     "symbol",
     "source",
+    "side",           # BID | ASK
     "event_type",     # ADD | MODIFY | FILL | CANCEL
     "event_seq",      # monotonic int, per-order sequence number starting at 0
     "ts",             # int64, nanoseconds since Unix epoch UTC
@@ -97,6 +99,12 @@ def stage_b(df: pd.DataFrame) -> pd.DataFrame:
 
     # { order_id: { "remaining": float, "price": float, "side": str, "session_id": int, "seq": int } }
     order_state: dict[int, dict] = {}
+
+    # sequence is an aux_col loaded as float64 by Stage A's pd.to_numeric().
+    # NaN values are silently dropped by groupby — fill to 0 and cast to int64
+    # so every row lands in a group and R (clear) events are never skipped.
+    df = df.copy()
+    df["sequence"] = df["sequence"].fillna(0).astype("int64")
 
     # Group by sequence number, preserving chronological order of groups
     # sort=False keeps original row order within groups

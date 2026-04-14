@@ -87,7 +87,7 @@ def run(events: pd.DataFrame) -> ValidationReport:
     """
     report = ValidationReport(
         total_rows=len(events),
-        total_orders=events.groupby(_KEY).ngroups,
+        total_orders=0 if events.empty else events.groupby(_KEY).ngroups,
     )
 
     if events.empty:
