@@ -1,0 +1,28 @@
+{
+    "version": 1,
+    "job_id": "XNAS-20260429-VPAM4YXMUV",
+    "query": {
+        "dataset": "XNAS.ITCH",
+        "schema": "mbo",
+        "symbols": [
+            "INTC"
+        ],
+        "stype_in": "raw_symbol",
+        "stype_out": "instrument_id",
+        "start": 1774224000000000000,
+        "end": 1774569600000000000,
+        "limit": null,
+        "encoding": "csv",
+        "compression": null
+    },
+    "customizations": {
+        "pretty_px": false,
+        "pretty_ts": false,
+        "map_symbols": true,
+        "split_symbols": true,
+        "split_duration": "day",
+        "split_size": null,
+        "packaging": null,
+        "delivery": "download"
+    }
+}
